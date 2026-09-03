@@ -5,6 +5,7 @@ import streamlit as st
 
 from data_prep import load_all_from_mws, format_parts
 from suggest import PartsSuggester
+from mws_client import create_record, invalidate_cache
 
 st.set_page_config(page_title="🚲 Vanta ERP — цикл ремонта", page_icon="🚲", layout="wide")
 
@@ -66,8 +67,9 @@ MANAGERS = ["Женя", "Тест"]
 
 
 def append_log(sn, from_status, to_status, master, comment, parts_str, work_type, manager, hours=None):
+    now = dt.datetime.now()
     st.session_state.log.append({
-        "date": dt.datetime.now(),
+        "date": now,
         "sn": sn,
         "from_status": from_status,
         "to_status": to_status,
@@ -78,6 +80,27 @@ def append_log(sn, from_status, to_status, master, comment, parts_str, work_type
         "work_type": work_type,
         "manager": manager,
     })
+
+    # Реальная запись в MWS — не только в журнал этой сессии. Если это не получилось,
+    # показываем ошибку явно: значит статус велосипеда в MWS не поменялся, и это надо
+    # заметить сразу, а не выяснять потом, почему автоматизация не сработала.
+    try:
+        create_record("history", {
+            "Дата": int(now.timestamp() * 1000),
+            "ID/Серийный": sn,
+            "Откуда": from_status or "",
+            "Куда": to_status or "",
+            "Время (ч)": hours if hours is not None else 0,
+            "Кто": master or "",
+            "Комментарий": comment or "",
+            "Запчасти": parts_str or "",
+            "Тип работы": work_type or "",
+            "Менеджер (проверил)": manager or "",
+        })
+        invalidate_cache()
+    except Exception as e:
+        st.error(f"⚠️ Не получилось записать в MWS: {e}. Показано только в этой сессии браузера — "
+                 f"в реальной «Истории ремонтов» этой записи нет.")
 
 
 def set_status(row_idx, new_status, **fields):
@@ -98,7 +121,7 @@ def get_bike_history(sn_norm, limit=5):
 
 
 st.title("🚲 Vanta ERP — прототип цикла ремонта")
-st.caption("Данные загружены из твоей реальной выгрузки. Это песочница: изменения живут только в этой сессии браузера и не трогают исходный файл.")
+st.caption("Данные — живые, из MWS. Действия мастера и администратора здесь по-настоящему пишутся в «Историю ремонтов» в MWS.")
 
 tab_master, tab_admin, tab_log = st.tabs(["🔧 Мастер", "✅ Проверка (администратор)", "📜 Журнал сессии"])
 

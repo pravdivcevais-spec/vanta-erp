@@ -67,6 +67,34 @@ def fetch_all_records(table_key: str) -> list[dict]:
     return all_records
 
 
+def create_record(table_key: str, fields: dict) -> str:
+    """Создаёт новую запись в указанной таблице MWS. Возвращает recordId."""
+    if table_key not in TABLES:
+        raise ValueError(f"Неизвестная таблица: {table_key}")
+
+    cfg = TABLES[table_key]
+    token = _get_token()
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    url = f"{BASE_URL}/datasheets/{cfg['datasheetId']}/records"
+    params = {"viewId": cfg["viewId"], "fieldKey": "name"}
+    body = {"fieldKey": "name", "records": [{"fields": fields}]}
+
+    resp = requests.post(url, headers=headers, params=params, json=body, timeout=30)
+    resp.raise_for_status()
+    payload = resp.json()
+
+    if not payload.get("success"):
+        raise RuntimeError(f"MWS API вернул ошибку при создании записи в «{cfg['label']}»: {payload}")
+
+    return payload["data"]["records"][0]["recordId"]
+
+
+def invalidate_cache():
+    """Сбрасывает кэш fetch_all_records, чтобы следующая загрузка забрала свежие данные
+    сразу после записи, а не ждала истечения TTL (2 минуты)."""
+    fetch_all_records.clear()
+
+
 def records_to_field_rows(records: list[dict]) -> list[dict]:
     """[{recordId, fields: {...}}] -> [{...fields..., '_recordId': ...}]"""
     rows = []
