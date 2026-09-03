@@ -112,24 +112,26 @@ def load_all_from_mws():
     # Значение приходит как массив ID связанных записей — читаемого номера IoT напрямую
     # без похода в связанную таблицу не получить, поэтому просто сохраняем как есть.
     bikes_out = []
-    missing_bike_fields = set()
+    found_bike_field_counts = {key: 0 for key in bike_field_candidates}
     for row in bikes_rows:
         entry = {}
         for key, candidates in bike_field_candidates.items():
             val, found = pick_field(row, candidates)
             entry[key] = val
-            if found is None:
-                missing_bike_fields.add(key)
+            if found is not None:
+                found_bike_field_counts[key] += 1
         iot_val, _ = pick_field(row, ["IOT текущий", "IoT текущий", "IoT", "IOT"])
         if isinstance(iot_val, list):
             entry["iot"] = ", ".join(str(v) for v in iot_val) if iot_val else ""
         else:
             entry["iot"] = iot_val or ""
         bikes_out.append(entry)
-    for key in missing_bike_fields:
-        warnings.append(f"«Реестр»: не нашла поле для «{key}» (пробовала: {bike_field_candidates[key]}).")
-    if bikes_rows:
-        warnings.append(f"«Реестр»: реальные названия полей в первой записи: {list(bikes_rows[0].keys())}")
+    # Предупреждаем только если поля нет НИ В ОДНОЙ записи — MWS просто не отдаёт
+    # пустые поля конкретной записи, так что отсутствие в паре строк — это норма,
+    # а не ошибка маппинга.
+    for key, count in found_bike_field_counts.items():
+        if bikes_rows and count == 0:
+            warnings.append(f"«Реестр»: поле «{key}» не встретилось ни в одной записи (пробовала: {bike_field_candidates[key]}).")
 
     bikes_df = pd.DataFrame(bikes_out)
     if not bikes_df.empty:
@@ -153,19 +155,18 @@ def load_all_from_mws():
         "manager": ["Менеджер (проверил)", "Менеджер"],
     }
     history_out = []
-    missing_hist_fields = set()
+    found_hist_field_counts = {key: 0 for key in history_field_candidates}
     for row in history_rows:
         entry = {}
         for key, candidates in history_field_candidates.items():
             val, found = pick_field(row, candidates)
             entry[key] = val
-            if found is None:
-                missing_hist_fields.add(key)
+            if found is not None:
+                found_hist_field_counts[key] += 1
         history_out.append(entry)
-    for key in missing_hist_fields:
-        warnings.append(f"«История ремонтов»: не нашла поле для «{key}» (пробовала: {history_field_candidates[key]}).")
-    if history_rows:
-        warnings.append(f"«История ремонтов»: реальные названия полей в первой записи: {list(history_rows[0].keys())}")
+    for key, count in found_hist_field_counts.items():
+        if history_rows and count == 0:
+            warnings.append(f"«История ремонтов»: поле «{key}» не встретилось ни в одной записи (пробовала: {history_field_candidates[key]}).")
 
     history_df = pd.DataFrame(history_out)
     if not history_df.empty:
@@ -177,7 +178,11 @@ def load_all_from_mws():
         date_from_str = pd.to_datetime(date_raw, errors="coerce")
         history_df["date"] = date_from_ms.fillna(date_from_str)
 
-    # ---------- Актуальный статус велосипеда = "Куда" из его последней записи в истории ----------
+    # ---------- Актуальный статус велосипеда ----------
+    # Единственный источник — последняя по дате запись в "Истории ремонтов" (поле "Куда").
+    # "Тех статус" в "Реестре" сюда не пишется никакой автоматикой на стороне MWS,
+    # поэтому не используется. Статус локации — только подстраховка, если по велику
+    # вообще нет ни одной записи в истории.
     if not bikes_df.empty:
         if not history_df.empty:
             history_sorted = history_df.dropna(subset=["date"]).sort_values("date", ascending=False)
@@ -191,7 +196,7 @@ def load_all_from_mws():
                 to_status = latest_by_bike.loc[sn, "to_status"]
                 if isinstance(to_status, str) and to_status.strip():
                     return to_status.strip().upper()
-            # Нет истории по этому велику — оцениваем по статусу локации
+
             loc = str(row.get("loc_status") or "").strip().lower()
             if loc in ("свободен", "склад"):
                 return "ОЖИДАЕТ РЕМОНТА"
