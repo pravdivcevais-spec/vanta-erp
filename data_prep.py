@@ -135,6 +135,11 @@ def load_all_from_mws():
 
     bikes_df = pd.DataFrame(bikes_out)
     if not bikes_df.empty:
+        bike_text_cols = ["sn", "gov", "bike_type", "acc_status", "loc_status",
+                           "tech_status", "rental_type", "comment", "errors"]
+        for col in bike_text_cols:
+            bikes_df[col] = bikes_df[col].where(bikes_df[col].notna(), "")
+
         bikes_df["sn_norm"] = bikes_df["sn"].apply(norm_id)
         bikes_df["master"] = ""
         bikes_df["manager"] = ""
@@ -170,6 +175,13 @@ def load_all_from_mws():
 
     history_df = pd.DataFrame(history_out)
     if not history_df.empty:
+        # MWS не присылает пустые поля конкретной записи — они приходят как None и потом
+        # превращаются в NaN, который в f-строках печатается как текст "nan". Заменяем
+        # на обычную пустую строку сразу, чтобы это нигде не всплывало в интерфейсе.
+        text_cols = ["sn", "from_status", "to_status", "master", "comment", "parts", "work_type", "manager"]
+        for col in text_cols:
+            history_df[col] = history_df[col].where(history_df[col].notna(), "")
+
         history_df["sn_norm"] = history_df["sn"].apply(norm_id)
         # Поле "Дата" в MWS отдаёт timestamp в миллисекундах (число), а не строку с датой —
         # если вдруг пришла строка, пробуем распарсить и так, не теряя исходное значение.
@@ -179,10 +191,14 @@ def load_all_from_mws():
         history_df["date"] = date_from_ms.fillna(date_from_str)
 
     # ---------- Актуальный статус велосипеда ----------
-    # Единственный источник — последняя по дате запись в "Истории ремонтов" (поле "Куда").
-    # "Тех статус" в "Реестре" сюда не пишется никакой автоматикой на стороне MWS,
-    # поэтому не используется. Статус локации — только подстраховка, если по велику
-    # вообще нет ни одной записи в истории.
+    # "История ремонтов" фиксирует только цикл ремонта (ремонт -> проверка -> свободен),
+    # но НЕ фиксирует момент сдачи велика в аренду — это отдельное событие, которое в неё
+    # не попадает. Поэтому если велик СЕЙЧАС в аренде (по "Статус локации" в "Реестре") —
+    # это более свежий и более авторитетный факт, чем любая старая запись в истории,
+    # и статус ремонта из истории в этом случае игнорируется. Историю смотрим только
+    # для великов, которые сейчас не в аренде — чтобы понять, на каком этапе ремонта они.
+    RENTED_LOC_VALUES = ("в аренде", "аренда", "выдан", "у клиента")
+
     if not bikes_df.empty:
         if not history_df.empty:
             history_sorted = history_df.dropna(subset=["date"]).sort_values("date", ascending=False)
@@ -191,13 +207,16 @@ def load_all_from_mws():
             latest_by_bike = pd.DataFrame()
 
         def infer_status(row):
+            loc = str(row.get("loc_status") or "").strip().lower()
+
+            if loc in RENTED_LOC_VALUES:
+                return "В АРЕНДЕ / НЕДОСТУПЕН"
+
             sn = row["sn_norm"]
             if not latest_by_bike.empty and sn in latest_by_bike.index:
                 to_status = latest_by_bike.loc[sn, "to_status"]
                 if isinstance(to_status, str) and to_status.strip():
                     return to_status.strip().upper()
-
-            loc = str(row.get("loc_status") or "").strip().lower()
             if loc in ("свободен", "склад"):
                 return "ОЖИДАЕТ РЕМОНТА"
             return "В АРЕНДЕ / НЕДОСТУПЕН"
