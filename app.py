@@ -153,7 +153,7 @@ with tab_master:
         bike = bikes_df.loc[row_idx]
 
         st.markdown(
-            f"**S/N:** {bike.sn_norm} &nbsp;&nbsp; **IoT:** {bike.iot} &nbsp;&nbsp; "
+            f"**S/N:** {bike.sn_norm} &nbsp;&nbsp; **IoT:** {bike.iot or '—'} &nbsp;&nbsp; "
             f"**Гос:** {bike.gov} &nbsp;&nbsp; **Тип:** {bike.bike_type}",
             unsafe_allow_html=True,
         )

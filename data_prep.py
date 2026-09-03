@@ -108,9 +108,18 @@ def load_all_from_mws():
         "comment": ["Комментарий"],
         "errors": ["ОШИБКИ", "Ошибки"],
     }
-    # "IOT текущий" — поле типа "Магическая ссылка" (связь с другой записью), а не текст.
-    # Значение приходит как массив ID связанных записей — читаемого номера IoT напрямую
-    # без похода в связанную таблицу не получить, поэтому просто сохраняем как есть.
+    # "IOT текущий" в "Реестре" — "Магическая ссылка" на таблицу "Локации", а не текст.
+    # Через API приходит массив ID связанных записей ("recXXXX"), а читаемый код устройства
+    # ("25-0251") лежит в поле, которое тоже называется "IOT текущий", но уже в самой
+    # таблице "Локации". Резолвим: тянем "Локации" целиком и строим словарь recordId -> код.
+    locations_rows = records_to_field_rows(fetch_all_records("locations"))
+    location_code_by_id = {}
+    for row in locations_rows:
+        code, _ = pick_field(row, ["IOT текущий", "IoT текущий", "IOT", "IoT"])
+        rec_id = row.get("_recordId")
+        if rec_id and code:
+            location_code_by_id[rec_id] = code
+
     bikes_out = []
     found_bike_field_counts = {key: 0 for key in bike_field_candidates}
     for row in bikes_rows:
@@ -122,7 +131,8 @@ def load_all_from_mws():
                 found_bike_field_counts[key] += 1
         iot_val, _ = pick_field(row, ["IOT текущий", "IoT текущий", "IoT", "IOT"])
         if isinstance(iot_val, list):
-            entry["iot"] = ", ".join(str(v) for v in iot_val) if iot_val else ""
+            resolved = [location_code_by_id.get(rec_id, rec_id) for rec_id in iot_val]
+            entry["iot"] = ", ".join(resolved)
         else:
             entry["iot"] = iot_val or ""
         bikes_out.append(entry)
@@ -190,6 +200,13 @@ def load_all_from_mws():
         date_from_str = pd.to_datetime(date_raw, errors="coerce")
         history_df["date"] = date_from_ms.fillna(date_from_str)
 
+        # У многих исторических записей "Дата" совпадает день-в-день (особенно из старой
+        # массовой выгрузки) — тогда одной даты недостаточно, чтобы понять, какая запись
+        # реальнее последняя. Запоминаем порядок, в котором записи пришли от MWS (обычно
+        # это порядок строк, как в самой таблице сверху вниз = порядок добавления), и
+        # используем как "суддья" при равных датах.
+        history_df["_seq"] = range(len(history_df))
+
     # ---------- Актуальный статус велосипеда ----------
     # "История ремонтов" фиксирует только цикл ремонта (ремонт -> проверка -> свободен),
     # но НЕ фиксирует момент сдачи велика в аренду — это отдельное событие, которое в неё
@@ -201,8 +218,11 @@ def load_all_from_mws():
 
     if not bikes_df.empty:
         if not history_df.empty:
-            history_sorted = history_df.dropna(subset=["date"]).sort_values("date", ascending=False)
-            latest_by_bike = history_sorted.drop_duplicates(subset=["sn_norm"], keep="first").set_index("sn_norm")
+            # Сортируем по возрастанию (дата, потом порядок в MWS) и берём последнюю
+            # строку на велосипед — так при совпадающих датах побеждает запись, которая
+            # реально была добавлена позже, а не случайная из двух.
+            history_sorted = history_df.dropna(subset=["date"]).sort_values(["date", "_seq"], ascending=[True, True])
+            latest_by_bike = history_sorted.drop_duplicates(subset=["sn_norm"], keep="last").set_index("sn_norm")
         else:
             latest_by_bike = pd.DataFrame()
 

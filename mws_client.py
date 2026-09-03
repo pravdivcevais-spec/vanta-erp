@@ -8,9 +8,10 @@ import streamlit as st
 BASE_URL = "https://tables.mws.ru/fusion/v1"
 
 TABLES = {
-    "parts":   {"datasheetId": "dst3VS4Stv4E8nLS84", "viewId": "viwqpEVQwCbTb", "label": "База запчастей"},
-    "bikes":   {"datasheetId": "dstdNq0D8LM4JXNFaK", "viewId": "viwygjYeVG394", "label": "Реестр"},
-    "history": {"datasheetId": "dsttLLP76YbBo642EU", "viewId": "viwxWKlCL27qB", "label": "История ремонтов"},
+    "parts":     {"datasheetId": "dst3VS4Stv4E8nLS84", "viewId": "viwqpEVQwCbTb", "label": "База запчастей"},
+    "bikes":     {"datasheetId": "dstdNq0D8LM4JXNFaK", "viewId": "viwygjYeVG394", "label": "Реестр"},
+    "history":   {"datasheetId": "dsttLLP76YbBo642EU", "viewId": "viwxWKlCL27qB", "label": "История ремонтов"},
+    "locations": {"datasheetId": "dsteuJmbKgmwF2Uo1P", "viewId": "viwsSf4kuDGNP", "label": "Локации"},
 }
 
 
